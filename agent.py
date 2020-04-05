@@ -10,6 +10,7 @@ import os
 
 from env.env import GRID, ACTION_NAMES, POS_TO_INDEX, N_ACTIONS
 from network import DCAnet
+from network import network as Net
 from util import mask_out, get_latest_checkpoint, rotate_state_action
 
 class Agent(object):
@@ -107,6 +108,47 @@ class RandomAgent(Agent):
 		'''
 		actions = np.argwhere(feasible_actions)
 		return actions[np.random.randint(0,len(actions))]
+
+	def play(self, env, greedy=False):
+		# play game with agent until the end
+		G = 0.0
+		discount = 1.0
+		end = False
+
+		if self.render: # render the state of the board at the begining of the game
+			env.init_fig()
+			env.render()
+			sleep(1.5)
+
+		while not end:
+			action = self.select_action(env.feasible_actions)
+			if self.render:
+				env.render(action=action, show_action=True) # render a first time displaying the action selected
+				sleep(0.8)
+			reward, _, end = env.step(action)
+			G += discount * reward
+			discount = discount * self.gamma
+			if self.render:
+				env.render() # render a second time the state of the board after the action is played
+				sleep(0.6)
+
+		if self.render:
+			env.render()
+			sleep(2)
+			plt.close()
+
+		return (G, env.n_pegs)
+
+
+	def evaluate(self, env, n_games, n_workers):
+		# play n_games and store the final reward and number of pegs left for each game
+		envs = [deepcopy(env) for _ in range(n_games)]
+		pool = ThreadPool(n_workers)
+		results = pool.map(self.play, envs)
+		rewards, pegs_left = zip(*results)
+		pool.close()
+		pool.join()
+		return dict({"rewards" : rewards, "pegs_left" : pegs_left})
 
 
 
@@ -288,7 +330,7 @@ class DCAAgent(Agent):
 	def __init__(self, agent_config, net_config, render=False, restore=False):
 		super().__init__(agent_config['name'], agent_config['gamma'], render)
 		self.net_config = net_config
-		#self.net = DCAnet.get_nnet_model()
+		self.net = DCAnet.get_nnet_model()
 		# self.net.build()
 		# if restore:
 		# 	latest_checkpoint = get_latest_checkpoint(os.path.join(checkpoint_dir, "checkpoint"))
@@ -306,15 +348,13 @@ class DCAAgent(Agent):
 		env.reset()
 		t = 0
 		end = False
-		data = []
 		states = []
-		#actions = []
 		costs = [] # cost is step away from the goal state
 
 		while t <= T_update_net and not end:
 			state = env.state
 			states.append(state)
-			action_index = self.select_action( env.feasible_actions)
+			action_index = self.select_action( env.feasible_actions,True)
 			cost, next_state, end = env.step(tuple(action_index))
 			#actions.append(action_index)
 			costs.append(cost)
@@ -325,8 +365,26 @@ class DCAAgent(Agent):
 		data=(states,costs)
 		return data,end
 
+	def naive_policy(self,env,heuristic,feasible_actions):
+		new_states=[]
+		actions = np.argwhere(feasible_actions)
+		for action in actions:
+			new_state=env.get_new_state(action)
+			new_states.append([new_state[:,:,0]])
+		new_states_flatten = DCAnet.state_to_nnet_input(new_states)
+		cost_to_go=heuristic(new_states_flatten)
+		best_act_ind=[]
+		min_ctg=float('inf')
+		for idx,ctg in enumerate(cost_to_go):
+			if ctg<=min_ctg:
+				min_ctg=ctg
+				best_act_ind.append(idx)
+		best_act=np.random.choice(best_act_ind)
+		action=actions[best_act]
+		return action
 
-	def select_action(self, feasible_actions):
+
+	def select_action(self, feasible_actions,greedy):
 		'''
         Selects an action at random from the legal actions in the current state of the env, which are given by `feasible_actions`.
         Parameters
@@ -338,8 +396,11 @@ class DCAAgent(Agent):
         out : tuple of ints (pos_id, move_id)
             a tuple representing the action selected : which peg to pick up, and where to move it.
         '''
-		actions = np.argwhere(feasible_actions)
-		return actions[np.random.randint(0, len(actions))]
+		if greedy:
+			actions = np.argwhere(feasible_actions)
+			return actions[np.random.randint(0, len(actions))]
+
+
 
 
 	def train(self, env, n_games, data_buffer, batch_size, n_workers, display_every, T_update_net):
@@ -393,20 +454,20 @@ class DCAAgent(Agent):
 			pool.join()
 
 
-	def play(self, env, greedy=False):
+	def play(self,arg):
 		# play game with agent until the end
 		G = 0.0
 		discount = 1.0
 		end = False
-
+		env,heuristic=arg
 		if self.render: # render the state of the board at the begining of the game
 			env.init_fig()
 			env.render()
 			sleep(1.5)
 
 		while not end:
-			action_index = self.select_action(env.state, env.feasible_actions, greedy=greedy)
-			action = divmod(action_index, 4)
+			action = self.naive_policy(env,heuristic,env.feasible_actions)
+
 			if self.render:
 				env.render(action=action, show_action=True) # render a first time displaying the action selected
 				sleep(0.8)
@@ -425,11 +486,11 @@ class DCAAgent(Agent):
 		return (G, env.n_pegs)
 
 
-	def evaluate(self, env, n_games, n_workers):
+	def evaluate(self, env,heuristic, n_games, n_workers):
 		# play n_games and store the final reward and number of pegs left for each game
-		envs = [deepcopy(env) for _ in range(n_games)]
+		args = [(deepcopy(env),deepcopy(heuristic)) for _ in range(n_games)]
 		pool = ThreadPool(n_workers)
-		results = pool.map(self.play, envs)
+		results = pool.map(self.play, args)
 		rewards, pegs_left = zip(*results)
 		pool.close()
 		pool.join()
