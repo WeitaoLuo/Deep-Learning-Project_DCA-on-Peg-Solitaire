@@ -3,6 +3,7 @@ from __future__ import division
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
+import copy
 
 from .rendering import *
 from .border_constraints import compute_out_of_border_actions
@@ -94,6 +95,18 @@ class Env(object):
 		self.n_pegs = N_PEGS
 		self._init_pegs()
 
+	def get_new_state(self,action):
+		peg_copy=copy.deepcopy(self.pegs)
+		pos_id, move_id = action
+		pos = GRID[pos_id]
+		x, y = pos
+		d_x, d_y = MOVES[move_id]
+		self.pegs[pos] = 0  # peg moves from its current position
+		self.pegs[(x + d_x, y + d_y)] = 0  # jumps over an adjacent peg
+		self.pegs[(x + 2 * d_x, y + 2 * d_y)] = 1  # ends up in new position
+		new_state=self.state
+		self.pegs=peg_copy
+		return new_state
 
 	def step(self, action):
 		'''
