@@ -14,6 +14,7 @@ import torch.optim as optim
 from torch.optim.optimizer import Optimizer
 
 import time
+from env.env import Env
 
 
 def get_nnet_model() -> nn.Module:
@@ -30,6 +31,15 @@ def state_to_nnet_input( states: List) -> List[List[np.ndarray]]:
     # representation_np: np.ndarray = representation_np.astype(self.dtype)
 
     representation: List[List[np.ndarray]] = [[x] for x in representation_np]
+
+    # representation_exp=[]
+    # for x in representation:
+    #     temp=np.zeros((7,7))
+    #     for i in range(0,7):
+    #         for j in range(0,7):
+    #             if x[0][i][j]==1:
+    #                 temp[i][j]=(i*6+j)/24.5
+    #     representation_exp.append([temp])
 
     return representation
 
@@ -59,7 +69,21 @@ def generate_batch(data:Tuple[List,np.ndarray],batch_size:int) ->List[Tuple[np.n
         start_ind=end_ind
     return data_batches
 
-# def update_value(data:Tuple[List,np.ndarray],)
+def update_value(data:Tuple[List,np.ndarray],heuristic_fn) -> Tuple[List,np.ndarray]:
+    states,y=data
+    updated_y=[]
+    for state in states:
+        new_states=[]
+        env=Env(mid=True,mid_state=state[0])
+        actions = np.argwhere(env.feasible_actions)
+        for action in actions:
+            new_state = env.get_new_state(action)
+            new_states.append([new_state[:, :, 0]])
+        ctg=heuristic_fn(new_states)
+        min_ctg=min(ctg)
+        updated_y.append(min_ctg)
+
+    return (states,np.array(updated_y))
 
 def tarin_nnet(nnet:nn.Module,data:Tuple[List,np.ndarray],device:torch.device,on_gpu:bool,batch_szie:int,
                num_itrs:int,train_itr:int=0,display:bool=True):
@@ -68,6 +92,8 @@ def tarin_nnet(nnet:nn.Module,data:Tuple[List,np.ndarray],device:torch.device,on
     optimizer:Optimizer=optim.Adam(nnet.parameters(),lr=0.001)
 
     start_time=time.time()
+
+    #data=update_value(data,get_heuristic_fn(nnet,device))
     batches:List[Tuple[np.ndarray,np.ndarray]]=generate_batch(data,batch_szie)
 
     nnet.train()

@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/Deep-Learning-Project_DCA-on-Peg-Solitaire.iml" filepath="$PROJECT_DIR$/.idea/Deep-Learning-Project_DCA-on-Peg-Solitaire.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/RL-solitaire-master.iml" filepath="$PROJECT_DIR$/.idea/RL-solitaire-master.iml" />
     </modules>
   </component>
 </project>

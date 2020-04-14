@@ -344,7 +344,7 @@ class DCAAgent(Agent):
 		# self.state_channels = net_config["state_channels"]
 
 
-	def collect_data(self, env, T_update_net):
+	def collect_data(self, env, T_update_net,forward=False):
 		env.reset()
 		t = 0
 		end = False
@@ -355,12 +355,13 @@ class DCAAgent(Agent):
 			state = env.state
 			states.append(state)
 			action_index = self.select_action( env.feasible_actions,True)
-			cost, next_state, end = env.step(tuple(action_index))
+			if forward:
+				cost, next_state, end = env.step_data_collection(tuple(action_index))
+			else:
+				cost, next_state, end = env.step(tuple(action_index))
 			#actions.append(action_index)
 			costs.append(cost)
 			t += 1
-
-
 
 		data=(states,costs)
 		return data,end
@@ -376,9 +377,9 @@ class DCAAgent(Agent):
 		best_act_ind=[]
 		min_ctg=float('inf')
 		for idx,ctg in enumerate(cost_to_go):
-			if ctg<=min_ctg:
+			if ctg<min_ctg:
 				min_ctg=ctg
-				best_act_ind.append(idx)
+		best_act_ind=[idx for idx,c in enumerate(cost_to_go) if c==min_ctg]
 		best_act=np.random.choice(best_act_ind)
 		action=actions[best_act]
 		return action

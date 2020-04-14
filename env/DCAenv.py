@@ -4,9 +4,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
 from typing import List, Tuple
+import copy
 
 from .rendering import *
 from .border_constraints_DCA import compute_out_of_border_actions_DCA
+from .border_constraints import compute_out_of_border_actions
 
 GRID = [(i,j) for j in [-3,-2] for i in [-1,0,1]] + \
 	   [(i,j) for j in [-1,0,1] for i in np.arange(-3,4)] + \
@@ -27,6 +29,7 @@ N_ACTIONS = len(GRID) * 4
 ACTION_NAMES = ["up", "down", "right", "left"]
 MOVES = [(0,1), (0,-1), (1,0), (-1,0)]
 OUT_OF_BORDER_ACTIONS = compute_out_of_border_actions_DCA(GRID)
+OUT_OF_BORDER_ACTIONS_FOR = compute_out_of_border_actions(GRID)
 
 class DCAEnv(object):
 	"""A class implementing the solitaire environment"""
@@ -64,6 +67,8 @@ class DCAEnv(object):
 		self.verbose = verbose
 
 
+
+
 	def _init_pegs(self):
 		'''
 		Initializes the positions of the pegs in the grid : puts a peg on each position except the center one (0,0).
@@ -95,6 +100,19 @@ class DCAEnv(object):
 		self.n_pegs = 1
 		self._init_pegs()
 
+	def get_new_state(self,action):
+		peg_copy=copy.deepcopy(self.pegs)
+		pos_id, move_id = action
+		pos = GRID[pos_id]
+		x, y = pos
+		d_x, d_y = MOVES[move_id]
+		self.pegs[pos] = 0  # peg moves from its current position
+		self.pegs[(x + d_x, y + d_y)] = 0  # jumps over an adjacent peg
+		self.pegs[(x + 2 * d_x, y + 2 * d_y)] = 1  # ends up in new position
+		new_state=self.state
+		self.pegs=peg_copy
+		return new_state
+
 
 	def step(self, action):
 		'''
@@ -118,6 +136,7 @@ class DCAEnv(object):
 		pos = GRID[pos_id]
 		x, y = pos
 		d_x, d_y = MOVES[move_id]
+		actions = [j for i in self.feasible_actions_for for j in i if j == True]
 		self.pegs[pos] = 0 # peg moves from its current position
 		self.pegs[(x - d_x, y - d_y)] = 1 # jumps over an adjacent peg
 		self.pegs[(x - 2*d_x, y - 2*d_y)] = 1 # ends up in new position
@@ -127,18 +146,19 @@ class DCAEnv(object):
 		if self.n_pegs == 32:
 			if self.verbose:
 				print('End of the game, you solved the puzzle !')
-			return self.n_pegs-1, self.state, True
+			return self.n_pegs, self.state, True
 
 		else:
 			# compute possible next moves
 			if np.sum(self.feasible_actions) == 0: # no more actions available
 				if self.verbose:
 					print('End of the game. You lost : {} pegs remaining'.format(self.n_pegs))
-				return self.n_pegs-2, self.state, True
+				return self.n_pegs, self.state, True
 			else:
 				# reward is an increasing function of the percentage of the game achieved
 				#return ((N_PEGS - self.n_pegs) / (N_PEGS-1)) ** 2, self.state, False
-				return self.n_pegs-2, self.state, False
+
+				return self.n_pegs-1-len(actions), self.state, False
 
 
 	def get_n_neighbours(self, pos):
@@ -166,8 +186,17 @@ class DCAEnv(object):
 			n -= 1
 		if (x,y-1) not in self.pegs.keys() or self.pegs[(x,y-1)] == 1:
 			n -= 1
-		return n 
+		return n
 
+	@property
+	def state_cost(self):
+		dis=0
+		for key,val in self.pegs.items():
+			if val==1:
+				x,y=key
+				dis=dis+abs(x)+abs(y)
+
+		return dis
 
 	@property
 	def state(self):
@@ -285,3 +314,30 @@ class DCAEnv(object):
 		plt.title('Current State of the Board')
 		self.fig.canvas.draw()
 		[p.remove() for p in reversed(ax.patches)]
+
+	@property
+	def feasible_actions_for(self):
+		'''
+        Returns a 2d-array of bools indicating, for each position on the grid, whether each action (up, down, right, left) is feasible
+        (True) or not (False).
+        '''
+		actions = np.ones((len(GRID), 4), dtype=bool)
+		# go through all positions
+		for i, pos in enumerate(GRID):
+			if self.pegs[pos] == 0:  # if no peg at the position no action feasible from that position
+				actions[i, :] = False
+			else:
+				x, y = pos
+				out_of_borders = OUT_OF_BORDER_ACTIONS_FOR[i]
+				actions[i, out_of_borders == True] = False
+				for k in range(4):
+					if out_of_borders[k] == False:
+						if not self.action_jump_feasible_for(pos, k):
+							actions[i, k] = False
+		return actions
+
+	def action_jump_feasible_for(self, pos, move_id):
+
+		x,y = pos
+		d_x, d_y = MOVES[move_id]
+		return self.pegs[(x + d_x, y + d_y)] == 1 and self.pegs[(x + 2*d_x, y + 2*d_y)] == 0

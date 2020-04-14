@@ -31,7 +31,7 @@ OUT_OF_BORDER_ACTIONS = compute_out_of_border_actions(GRID)
 class Env(object):
 	"""A class implementing the solitaire environment"""
 
-	def __init__(self, verbose=False, init_fig=False, interactive_plot=False):
+	def __init__(self, verbose=False, init_fig=False, interactive_plot=False,mid=False,mid_state=None):
 		'''
 		Instanciates an object of the class Env by initializing the number of pegs in the game as well as their positions on the grid.
 
@@ -62,6 +62,21 @@ class Env(object):
 		else:
 			self.interactive_plot = False
 		self.verbose = verbose
+
+		if mid:
+			for pos in GRID:
+				self.pegs[pos] = 0
+			count=0
+			for i in range(0,7):
+				for j in range(0,7):
+					if mid_state[i][j]==1:
+						count=count+1
+						# i = 3 - y
+						# j = x + 3
+						y=3-i
+						x=j-3
+						self.pegs[(x,y)]=1
+		a=1
 
 
 	def _init_pegs(self):
@@ -107,6 +122,34 @@ class Env(object):
 		new_state=self.state
 		self.pegs=peg_copy
 		return new_state
+
+	def step_data_collection(self,action):
+		pos_id, move_id = action
+		pos = GRID[pos_id]
+		x, y = pos
+		d_x, d_y = MOVES[move_id]
+		actions = [j for i in self.feasible_actions for j in i if j == True]
+		self.pegs[pos] = 0  # peg moves from its current position
+		self.pegs[(x + d_x, y + d_y)] = 0  # jumps over an adjacent peg
+		self.pegs[(x + 2 * d_x, y + 2 * d_y)] = 1  # ends up in new position
+		self.n_pegs -= 1
+
+		# check for game end
+		if self.n_pegs == 1:
+			if self.verbose:
+				print('End of the game, you solved the puzzle !')
+			return self.n_pegs, self.state, True
+
+		else:
+			# compute possible next moves
+			if np.sum(self.feasible_actions) == 0:  # no more actions available
+				if self.verbose:
+					print('End of the game. You lost : {} pegs remaining'.format(self.n_pegs))
+				return self.n_pegs, self.state, True
+			else:
+				# reward is an increasing function of the percentage of the game achieved
+				# return ((N_PEGS - self.n_pegs) / (N_PEGS-1)) ** 2, self.state, False
+				return self.n_pegs+1-len(actions), self.state, False
 
 	def step(self, action):
 		'''
@@ -178,7 +221,17 @@ class Env(object):
 			n -= 1
 		if (x,y-1) not in self.pegs.keys() or self.pegs[(x,y-1)] == 1:
 			n -= 1
-		return n 
+		return n
+
+	@property
+	def state_cost(self):
+		dis = 0
+		for key, val in self.pegs.items():
+			if val == 1:
+				x, y = key
+				dis = dis + abs(x) + abs(y)
+
+		return dis
 
 
 	@property

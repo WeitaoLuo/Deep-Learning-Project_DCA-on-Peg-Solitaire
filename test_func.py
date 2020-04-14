@@ -33,15 +33,44 @@ play_env=Env()
 nnet: nn.Module = DCAnet.get_nnet_model()
 
 def train_load():
-    data = []
-    for T in range(1, 32):
+    data_bck = []
+    data_for = []
+    data=[]
+    for T in range(15,32):
         n_games = 1000
         num_game = 1
         while num_game <= n_games:
             temp,_ = agent.collect_data(env, T)
             data.append(temp)
+            temp, _ = agent.collect_data(play_env, T,True)
+            reshaped_data=(list(np.array(temp[0])[:,:,:,0]),temp[1])
+            data.append(reshaped_data)
             num_game = num_game + 1
 
+    # data_com=[]
+    # data_com_count=[]
+    # for data_b in data_bck:
+    #     if len(data_b[0])<20:
+    #         continue
+    #     temp_list=data_b[0][19].tolist()
+    #     if temp_list not in data_com:
+    #         data_com.append(temp_list)
+    #         data_com_count.append(1)
+        # else:
+        #     data_com_count[data_com.index(temp_list)]+=1
+
+    # for data_f in data_for:
+    #     if len(data_f[0])<13:
+    #         continue
+    #     temp_list=data_f[0][12].tolist()
+    #     if temp_list in data_com:
+        #     data_com.append(temp_list)
+        #     data_com_count.append(1)
+        # else:
+        #     data_com_count[data_com.index(temp_list)]+=1
+
+
+    np.random.shuffle(data)
     return data
 
 def test_load():
@@ -126,6 +155,7 @@ def test_naive_policy():
     print(play_env.state[:,:,0])
 
 def test_DCA_eval():
+
     data = train_load()
     states = [s[0] for s in data]
     cost = [s[1] for s in data]
@@ -135,11 +165,12 @@ def test_DCA_eval():
     device = DCAnet.get_device()[0]
     nnet.to(device)
     states_data = (states_flatten, costs_exp)
-    DCAnet.tarin_nnet(nnet, states_data, device, False, 1000, 300,
+    DCAnet.tarin_nnet(nnet, states_data, device, False, 3000, 700,
                       train_itr=0)
 
     heu = DCAnet.get_heuristic_fn(nnet, device)
-    results = agent.evaluate(play_env, heu,500, 10)
+    play_env = Env()
+    results = agent.evaluate(play_env, heu,100, 10)
     mean_res={}
     for key,val in results.items():
         mean_res[key]=np.mean(val)
@@ -158,6 +189,7 @@ def test_DCA_eval():
 
 
     rand_agent=RandomAgent()
+    play_env = Env()
     res=rand_agent.evaluate(play_env,500,10)
     mean_res = {}
     for key, val in res.items():
@@ -174,4 +206,5 @@ def test_DCA_eval():
     print(mean_res)
     print('minimum number of pegs left: ', min_peg, ' count (less than mean): ', count)
 
+#train_load()
 test_DCA_eval()
