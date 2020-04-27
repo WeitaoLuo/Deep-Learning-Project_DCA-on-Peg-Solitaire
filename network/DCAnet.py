@@ -3,6 +3,7 @@ import numpy as np
 import os
 import torch
 from torch import nn
+from multiprocessing.dummy import Pool as ThreadPool
 
 from network.pytorch_models import ResnetModel
 from collections import OrderedDict
@@ -15,6 +16,8 @@ from torch.optim.optimizer import Optimizer
 
 import time
 from env.env import Env
+
+
 
 
 def get_nnet_model() -> nn.Module:
@@ -69,10 +72,10 @@ def generate_batch(data:Tuple[List,np.ndarray],batch_size:int) ->List[Tuple[np.n
         start_ind=end_ind
     return data_batches
 
-def update_value(data:Tuple[List,np.ndarray],heuristic_fn) -> Tuple[List,np.ndarray]:
+def update_value(data:Tuple[List,np.ndarray],heuristic_fn,forward:bool) -> Tuple[List,np.ndarray]:
     states,y=data
     updated_y=[]
-    for state in states:
+    for idx,state in enumerate(states):
         new_states=[]
         env=Env(mid=True,mid_state=state[0])
         actions = np.argwhere(env.feasible_actions)
@@ -80,20 +83,45 @@ def update_value(data:Tuple[List,np.ndarray],heuristic_fn) -> Tuple[List,np.ndar
             new_state = env.get_new_state(action)
             new_states.append([new_state[:, :, 0]])
         ctg=heuristic_fn(new_states)
-        min_ctg=min(ctg)
-        updated_y.append(min_ctg)
+        if len(ctg) ==0:
+            if forward:
+                updated_y.append([y[idx]])
+            else:
+                updated_y.append([0])
+        else:
+            min_ctg=min(ctg)
+            updated_y.append([min_ctg+1])
 
     return (states,np.array(updated_y))
 
+def update(data:Tuple[List,np.ndarray],heuristic_fn,forward:bool,n_workers)-> Tuple[List,np.ndarray]:
+    states,cost=data
+    break_pt=np.ceil(len(states))
+    args=[]
+    for i in range(n_workers):
+        temp_data=states[i*break_pt:(i+1)*break_pt]
+        args.append((temp_data,heuristic_fn,forward))
+    pool = ThreadPool(n_workers)
+    results = pool.map(update_value, args)
+    states,new_ctg = zip(*results)
+    pool.close()
+    pool.join()
+    return (states,new_ctg)
+
+
 def tarin_nnet(nnet:nn.Module,data:Tuple[List,np.ndarray],device:torch.device,on_gpu:bool,batch_szie:int,
-               num_itrs:int,train_itr:int=0,display:bool=True):
+               num_itrs:int,train_itr:int=0,display:bool=True,Update:bool=False,Forward=False):
     display_itrs=10
     loss=nn.MSELoss()
     optimizer:Optimizer=optim.Adam(nnet.parameters(),lr=0.001)
 
     start_time=time.time()
+    if Update==True:
+        print('Start Updating for %s states' % (len(data[0])))
+        data=update_value(data,get_heuristic_fn(nnet,device),Forward)
+        print('Finish updating. Time used is %s'%(time.time()-start_time))
 
-    #data=update_value(data,get_heuristic_fn(nnet,device))
+    start_time = time.time()
     batches:List[Tuple[np.ndarray,np.ndarray]]=generate_batch(data,batch_szie)
 
     nnet.train()

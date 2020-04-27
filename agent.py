@@ -8,7 +8,8 @@ from multiprocessing.dummy import Pool as ThreadPool
 from copy import deepcopy
 import os
 
-from env.env import GRID, ACTION_NAMES, POS_TO_INDEX, N_ACTIONS
+from env.env import GRID, ACTION_NAMES, POS_TO_INDEX, N_ACTIONS,Env
+from env.DCAenv import DCAEnv
 from network import DCAnet
 from network import network as Net
 from util import mask_out, get_latest_checkpoint, rotate_state_action
@@ -366,12 +367,15 @@ class DCAAgent(Agent):
 		data=(states,costs)
 		return data,end
 
-	def naive_policy(self,env,heuristic,feasible_actions):
+	def naive_policy(self,env,heuristic,feasible_actions,forward=True):
 		new_states=[]
 		actions = np.argwhere(feasible_actions)
 		for action in actions:
 			new_state=env.get_new_state(action)
-			new_states.append([new_state[:,:,0]])
+			if forward:
+				new_states.append([new_state[:,:,0]])
+			else:
+				new_states.append([new_state])
 		new_states_flatten = DCAnet.state_to_nnet_input(new_states)
 		cost_to_go=heuristic(new_states_flatten)
 		best_act_ind=[]
@@ -383,6 +387,7 @@ class DCAAgent(Agent):
 		best_act=np.random.choice(best_act_ind)
 		action=actions[best_act]
 		return action
+
 
 
 	def select_action(self, feasible_actions,greedy):
@@ -404,55 +409,51 @@ class DCAAgent(Agent):
 
 
 
-	def train(self, env, n_games, data_buffer, batch_size, n_workers, display_every, T_update_net):
-			envs = np.array([deepcopy(env) for _ in range(n_games)])
-			ended = np.array([False for _ in range(n_games)])
+	def play2(self,arg):
 
-			## USE A BUFFER OF COLLECTED DATA TO TRAIN THE NETWORK (or wait until the end of a game to use the values)
+		step_for=16
+		step_bck=15
+		match=False
+		for_inter_state=[]
+		bck_inter_state=[]
+		_,_,heuristic = arg
+		while match==False:
+			env_for=Env()
+			env_bck=DCAEnv()
+			non_ter=False
+			for _ in range(step_for):
+				action = self.naive_policy(env_for, heuristic, env_for.feasible_actions)
+				_, _, end = env_for.step(action)
+				if end:
+					non_ter=True
+					break
+			if non_ter:
+				for_inter_state.append(np.ones((7,7)).tolist())
+			else:
+				for_inter_state.append(env_for.state[:,:,0].tolist())
+			non_ter=False
+			for _ in range(step_bck):
+				action = self.naive_policy(env_bck, heuristic, env_bck.feasible_actions,False)
+				_, _, end = env_bck.step(action)
+				if end:
+					non_ter=True
+					break
+			if non_ter:
+				bck_inter_state.append(np.ones((7,7)).tolist())
+			else:
+				bck_inter_state.append(env_bck.state.tolist())
 
-			pool = ThreadPool(n_workers)
-			tb_logs = []
-			cmpt = 0
-			while np.sum(ended) < n_games:
-				# collect data from workers using same network stored only once in the base agent
-				results = pool.map(lambda x: self.collect_data(x, T_update_net), envs[~ended])
-				d, ended_new = zip(*results)
-				# add data to buffer
-				data_buffer.add_list([el for l in d for el in l])
 
-				# sample data from the buffer
-				batch = data_buffer.sample(n_samples=batch_size)
-				# prepare data to feed to tensorflow
-				data = dict({})
-				for key in ["advantage", "critic_target"]:
-					data[key] = np.array([dp[key] for dp in batch]).reshape(-1,1) # reshape to get proper shape for tensorflow input
-				data["state"] = np.array([dp["state"] for dp in batch]).reshape(-1,7,7)
-				action_mask = np.zeros((len(batch), N_ACTIONS), dtype=np.float32)
-				for i, dp in enumerate(batch):
-					index = dp["action"]
-					action_mask[i,index] = 1.0
-				data["action_mask"] = action_mask
-				# update network with the data produced
-				summaries, critic_loss, actor_loss, l2_loss, loss = self.net.optimize(data)
+			if env_for.state[:,:,0].tolist() in bck_inter_state:
+				match=True
+			if env_bck.state.tolist() in for_inter_state:
+				match=True
 
-				# write obtained summaries to file, so they can be displayed in TensorBoard
-				self.net.summary_writer.add_summary(summaries, self.net.steps)
-				self.net.summary_writer.flush()
+			if len(for_inter_state)==1000:
+				return 1000,False
 
-				# display info on optimization step
-				if cmpt % display_every == 0:
-					print('Losses at step ', cmpt)
-					print('loss : {:.3f} | actor loss : {:.5f} | critic loss : {:.6f} | reg loss : {:.3f}'.format(loss,
-																											  	  actor_loss,
-																											  	  critic_loss,
-																											  	  l2_loss))
+		return len(for_inter_state),True
 
-				# update values of cmpt and ended
-				cmpt += 1
-				ended[~ended] = ended_new
-
-			pool.close()
-			pool.join()
 
 
 	def play(self,arg):
@@ -487,7 +488,7 @@ class DCAAgent(Agent):
 		return (G, env.n_pegs)
 
 
-	def evaluate(self, env,heuristic, n_games, n_workers):
+	def evaluate(self,env,heuristic, n_games, n_workers):
 		# play n_games and store the final reward and number of pegs left for each game
 		args = [(deepcopy(env),deepcopy(heuristic)) for _ in range(n_games)]
 		pool = ThreadPool(n_workers)

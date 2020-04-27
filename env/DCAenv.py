@@ -34,7 +34,7 @@ OUT_OF_BORDER_ACTIONS_FOR = compute_out_of_border_actions(GRID)
 class DCAEnv(object):
 	"""A class implementing the solitaire environment"""
 
-	def __init__(self, verbose=False, init_fig=False, interactive_plot=False):
+	def __init__(self, verbose=False, init_fig=False, interactive_plot=False,mid=False,mid_state=None):
 		'''
 		Instanciates an object of the class Env by initializing the number of pegs in the game as well as their positions on the grid.
 
@@ -65,6 +65,21 @@ class DCAEnv(object):
 		else:
 			self.interactive_plot = False
 		self.verbose = verbose
+
+		if mid:
+			for pos in GRID:
+				self.pegs[pos] = 0
+			count=0
+			for i in range(0,7):
+				for j in range(0,7):
+					if mid_state[i][j]==1:
+						count=count+1
+						# i = 3 - y
+						# j = x + 3
+						y=3-i
+						x=j-3
+						self.pegs[(x,y)]=1
+			self.n_pegs=count
 
 
 
@@ -107,8 +122,8 @@ class DCAEnv(object):
 		x, y = pos
 		d_x, d_y = MOVES[move_id]
 		self.pegs[pos] = 0  # peg moves from its current position
-		self.pegs[(x + d_x, y + d_y)] = 0  # jumps over an adjacent peg
-		self.pegs[(x + 2 * d_x, y + 2 * d_y)] = 1  # ends up in new position
+		self.pegs[(x - d_x, y - d_y)] = 1  # jumps over an adjacent peg
+		self.pegs[(x - 2 * d_x, y - 2 * d_y)] = 1  # ends up in new position
 		new_state=self.state
 		self.pegs=peg_copy
 		return new_state
@@ -136,17 +151,28 @@ class DCAEnv(object):
 		pos = GRID[pos_id]
 		x, y = pos
 		d_x, d_y = MOVES[move_id]
+		#cost = self.state_cost
 		actions = [j for i in self.feasible_actions_for for j in i if j == True]
+		count=0
+		for p in self.feasible_actions:
+			for act in p:
+				if act==True:
+					count+=1
+					break
 		self.pegs[pos] = 0 # peg moves from its current position
 		self.pegs[(x - d_x, y - d_y)] = 1 # jumps over an adjacent peg
 		self.pegs[(x - 2*d_x, y - 2*d_y)] = 1 # ends up in new position
 		self.n_pegs += 1
 
 		# check for game end
+		if self.n_pegs-1==1:
+			return 0, self.state, False
+
 		if self.n_pegs == 32:
 			if self.verbose:
 				print('End of the game, you solved the puzzle !')
 			return self.n_pegs, self.state, True
+			#return cost, self.state_rep, True
 
 		else:
 			# compute possible next moves
@@ -154,11 +180,13 @@ class DCAEnv(object):
 				if self.verbose:
 					print('End of the game. You lost : {} pegs remaining'.format(self.n_pegs))
 				return self.n_pegs, self.state, True
+				#return cost, self.state_rep, True
 			else:
-				# reward is an increasing function of the percentage of the game achieved
+				 #reward is an increasing function of the percentage of the game achieved
 				#return ((N_PEGS - self.n_pegs) / (N_PEGS-1)) ** 2, self.state, False
 
 				return self.n_pegs-1-len(actions), self.state, False
+				#return cost, self.state_rep, False
 
 
 	def get_n_neighbours(self, pos):
@@ -195,8 +223,22 @@ class DCAEnv(object):
 			if val==1:
 				x,y=key
 				dis=dis+abs(x)+abs(y)
-
+		dis=dis/40.0
 		return dis
+
+	@property
+	def state_rep(self):
+		state = np.zeros((7, 7), dtype=np.float32)
+		for pos, value in self.pegs.items():
+			if value==1:
+				x,y=pos
+				state[3 - pos[1], pos[0] + 3] = 5-(abs(x)+abs(y))
+		# state[3-pos[1], pos[0]+3,1] = self.get_n_neighbours(pos)
+		# state[3-pos[1], pos[0]+3,2] = self.get_n_empty(pos)
+
+		# state[:,:,1] = (self.n_pegs - 1) / (N_PEGS-1)
+		# state[:,:,2] = (N_PEGS - self.n_pegs) / (N_PEGS-1)
+		return state
 
 	@property
 	def state(self):

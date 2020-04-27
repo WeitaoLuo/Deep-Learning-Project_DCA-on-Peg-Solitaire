@@ -76,7 +76,8 @@ class Env(object):
 						y=3-i
 						x=j-3
 						self.pegs[(x,y)]=1
-		a=1
+			self.n_pegs=count
+
 
 
 	def _init_pegs(self):
@@ -129,16 +130,26 @@ class Env(object):
 		x, y = pos
 		d_x, d_y = MOVES[move_id]
 		actions = [j for i in self.feasible_actions for j in i if j == True]
+		#cost=self.state_cost
+		count = 0
+		for p in self.feasible_actions:
+			for act in p:
+				if act == True:
+					count += 1
+					break
 		self.pegs[pos] = 0  # peg moves from its current position
 		self.pegs[(x + d_x, y + d_y)] = 0  # jumps over an adjacent peg
 		self.pegs[(x + 2 * d_x, y + 2 * d_y)] = 1  # ends up in new position
 		self.n_pegs -= 1
 
 		# check for game end
+		if self.n_pegs+1==32:
+			return 32, self.state, False
 		if self.n_pegs == 1:
 			if self.verbose:
 				print('End of the game, you solved the puzzle !')
 			return self.n_pegs, self.state, True
+			#return cost, self.state_rep, True
 
 		else:
 			# compute possible next moves
@@ -146,10 +157,12 @@ class Env(object):
 				if self.verbose:
 					print('End of the game. You lost : {} pegs remaining'.format(self.n_pegs))
 				return self.n_pegs, self.state, True
+				#return cost, self.state_rep, True
 			else:
 				# reward is an increasing function of the percentage of the game achieved
 				# return ((N_PEGS - self.n_pegs) / (N_PEGS-1)) ** 2, self.state, False
 				return self.n_pegs+1-len(actions), self.state, False
+				#return cost, self.state_rep, False
 
 	def step(self, action):
 		'''
@@ -230,8 +243,38 @@ class Env(object):
 			if val == 1:
 				x, y = key
 				dis = dis + abs(x) + abs(y)
+				# if 5 - (abs(x) + abs(y)) > 1:
+				# 	if x == 0 and y == 0:
+				# 		dis = dis + 5 - (abs(x) + abs(y))
+				# 	else:
+				# 		dis = dis + 5 - (abs(x) + abs(y))-1
+				# else:
+				# 	dis = dis + 5 - (abs(x) + abs(y))
+		dis=dis/40.0
 
 		return dis
+
+	@property
+	def state_rep(self):
+		state = np.zeros((7, 7), dtype=np.float32)
+		for pos, value in self.pegs.items():
+			if value==1:
+				x, y = pos
+				state[3 - pos[1], pos[0] + 3] = 5-(abs(x) + abs(y))
+
+		return state
+
+	@property
+	def is_terminal(self):
+		one_left=False
+		for pos,value in self.pegs.items():
+			if value == 1:
+				if pos!= (0,0):
+					return False
+				else:
+					one_left=True
+
+		return one_left
 
 
 	@property

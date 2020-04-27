@@ -33,19 +33,76 @@ play_env=Env()
 nnet: nn.Module = DCAnet.get_nnet_model()
 
 def train_load():
-    data_bck = []
-    data_for = []
     data=[]
+    check_state=[]
+    cost=[]
     for T in range(15,32):
-        n_games = 1000
+        n_games = 5000
         num_game = 1
+        start_time=time.time()
+        print('------------------Max step = %s-----------------------'%T)
         while num_game <= n_games:
+            if num_game%1000==0:
+                print('Progress log: %s games using %s'%(num_game,time.time()-start_time))
             temp,_ = agent.collect_data(env, T)
             data.append(temp)
             temp, _ = agent.collect_data(play_env, T,True)
             reshaped_data=(list(np.array(temp[0])[:,:,:,0]),temp[1])
             data.append(reshaped_data)
             num_game = num_game + 1
+
+    np.random.shuffle(data)
+
+    return data
+
+def train_load2():
+    data=[]
+    check_state=[]
+    cost=[]
+    for T in range(31,32):
+        n_games = 10000
+        num_game = 1
+        while num_game <= n_games:
+            if num_game%1000==0:
+                print('Progress log: %s games'%num_game)
+            temp,_ = agent.collect_data(env, T)
+            length=31-len(temp[0])
+            for state in temp[0]:
+                fla_state=state.tolist()
+                if fla_state not in check_state:
+                    check_state.append(fla_state)
+                    cost.append([length])
+                    data.append(state)
+                else:
+                    idx=check_state.index(fla_state)
+                    cost[idx].append(length)
+
+            temp, _ = agent.collect_data(play_env, T,True)
+            reshaped_data=list(np.array(temp[0])[:,:,:,0])
+            length = 31 - len(reshaped_data)
+            for state in reshaped_data:
+                fla_state=state.tolist()
+                if fla_state not in check_state:
+                    check_state.append(fla_state)
+                    cost.append([length])
+                    data.append(state)
+                else:
+                    idx=check_state.index(fla_state)
+                    cost[idx].append(length)
+            # if len(temp)<31:
+            #     dis=31-len(temp[0])
+            #     new_cost = []
+            #     for idx, c in enumerate(temp[1]):
+            #         if idx > (len(temp[1]) - dis):
+            #             new_cost.append(c + idx - (len(temp[1]) - dis))
+            #         else:
+            #             new_cost.append(c)
+            #     data.append((temp[0], new_cost))
+            # else:
+            #data.append(reshaped_data)
+            num_game = num_game + 1
+
+    new_cost=[np.mean(c) for c in cost]
 
     # data_com=[]
     # data_com_count=[]
@@ -69,9 +126,7 @@ def train_load():
         # else:
         #     data_com_count[data_com.index(temp_list)]+=1
 
-
-    np.random.shuffle(data)
-    return data
+    return ([data],new_cost)
 
 def test_load():
     data = []
@@ -154,23 +209,45 @@ def test_naive_policy():
     play_env.step(action)
     print(play_env.state[:,:,0])
 
-def test_DCA_eval():
-
+def test_DCA_eval(num_exp):
+    print('---------------------------------------START TRAINING FOR EXP %s---------------------------------------' % num_exp)
+    filepath='C:/Users/anvyl/Desktop/Peg_solitaire_DCA/data/'+('exp_%s_15_32_bandf_10000.pkl'%num_exp)
+    print('Start data generataion')
+    start_time=time.time()
     data = train_load()
+    print('finish data genertaion at %s' %(time.time()-start_time))
+    pickle.dump(data, open(filepath, "wb"), protocol=-1)
     states = [s[0] for s in data]
     cost = [s[1] for s in data]
+    data = []
     costs = [c for cos in cost for c in cos]
+    #states,costs=data
     costs_exp = np.expand_dims(costs, 1)
     states_flatten = DCAnet.state_to_nnet_input(states)
     device = DCAnet.get_device()[0]
     nnet.to(device)
     states_data = (states_flatten, costs_exp)
-    DCAnet.tarin_nnet(nnet, states_data, device, False, 3000, 700,
+    batch_size=5000
+    print('Start training for %s iterations' %700)
+    DCAnet.tarin_nnet(nnet, states_data, device, False,batch_size, 1000,
                       train_itr=0)
+    torch.save(nnet.state_dict(), "%s_model_state_dict_noupdate.pt"%num_exp )
 
+    states=[]
+    states_flatten=[]
+    costs=[]
+    costs_exp=[]
+    states_data=()
+
+
+    print('Start evaluations')
     heu = DCAnet.get_heuristic_fn(nnet, device)
     play_env = Env()
-    results = agent.evaluate(play_env, heu,100, 10)
+    # bck_env = DCAEnv()
+    # arg=(play_env,bck_env,heu)
+    # num,found=agent.play2(arg)
+    # print(num,found)
+    results = agent.evaluate(play_env, heu,10, 10)
     mean_res={}
     for key,val in results.items():
         mean_res[key]=np.mean(val)
@@ -186,25 +263,31 @@ def test_DCA_eval():
     print('result of prelimary DCAAgent:')
     print(mean_res)
     print('minimum number of pegs left: ', min_peg, ' count (less than mean): ', count)
+    print('---------------------------------------FINISH TRAINING FOR EEXP %s---------------------------------------\n'%num_exp)
 
+    #
 
-    rand_agent=RandomAgent()
-    play_env = Env()
-    res=rand_agent.evaluate(play_env,500,10)
-    mean_res = {}
-    for key, val in res.items():
-        mean_res[key] = np.mean(val)
-        if key=='pegs_left':
-            plt.hist(val, bins='auto')
-            plt.xlabel('num of pegs left')
-            plt.ylabel('num of games')
-            plt.title('Random Agent')
-            plt.show()
-            min_peg=min(val)
-            count = len([i for i in val if i < mean_res['pegs_left']])
-    print('result of RandomAgent:')
-    print(mean_res)
-    print('minimum number of pegs left: ', min_peg, ' count (less than mean): ', count)
+    # rand_agent=RandomAgent()
+    # play_env = Env()
+    # res=rand_agent.evaluate(play_env,500,10)
+    # mean_res = {}
+    # for key, val in res.items():
+    #     mean_res[key] = np.mean(val)
+    #     if key=='pegs_left':
+    #         plt.hist(val, bins='auto')
+    #         plt.xlabel('num of pegs left')
+    #         plt.ylabel('num of games')
+    #         plt.title('Random Agent')
+    #         plt.show()
+    #         min_peg=min(val)
+    #         count = len([i for i in val if i < mean_res['pegs_left']])
+    # print('result of RandomAgent:')
+    # print(mean_res)
+    # print('minimum number of pegs left: ', min_peg, ' count (less than mean): ', count)
+
+def multi_run():
+    for i in range(10):
+        test_DCA_eval(i)
+multi_run()
 
 #train_load()
-test_DCA_eval()
