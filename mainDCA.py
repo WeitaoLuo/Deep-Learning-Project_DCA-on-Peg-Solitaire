@@ -62,7 +62,7 @@ def main():
 	device, devices, on_gpu = DCAnet.get_device()
 	print("device: %s, devices: %s, on_gpu: %s" % (device, devices, on_gpu))
 
-	save_dir='C:/Users/anvyl/Desktop/Peg_solitaire_DCA/saved_models'
+	save_dir='./saved_models'
 	nnet_name='DCA'
 	model_dir = "%s/%s" % (save_dir, nnet_name)
 

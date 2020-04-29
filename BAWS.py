@@ -93,7 +93,7 @@ def Astart(heuristic,lambda_):
     return previous_path,path,len(close)+len(open)
 
 def main():
-    model_file='C:/Users/anvyl/Desktop/Peg_solitaire_DCA/best_performance/1_model_state_dict_noupdate_3peg.pt'
+    model_file='./best_performance/1_model_state_dict.pt'
     nnet = DCAnet.load_nnet(model_file, DCAnet.get_nnet_model())
     device = DCAnet.get_device()[0]
     nnet.to(device)
