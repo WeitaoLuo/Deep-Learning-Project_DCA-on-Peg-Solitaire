@@ -1,7 +1,7 @@
 from __future__ import print_function
 import numpy as np
 import tensorflow as tf
-from time import time, sleep
+
 from tqdm import tqdm
 import os
 import pickle
@@ -25,41 +25,26 @@ import matplotlib.pyplot as plt
 
 warnings.filterwarnings("ignore")
 
-def data_load(agent,env,num_games,forward,steps):
+def train_load(agent,env,play_env):
 	data = []
-	if forward:
-		scramble_range=31
-	else:
-		scramble_range=steps
-	for T in range(scramble_range, scramble_range+1):
-		n_games = num_games
+	check_state = []
+	cost = []
+	for T in range(15, 32):
+		n_games = 5000
 		num_game = 1
+		start_time = time.time()
+		print('------------------Max step = %s-----------------------' % T)
 		while num_game <= n_games:
-			if forward==False:
-				temp,_ = agent.collect_data(env, T)
-				data.append(temp)
-			else:
-				temp,_=agent.collect_data(env, T, True)
-				end_pt=min(len(temp[0]),32-steps)
-				reshaped_data = (list(np.array(temp[0])[:, :, :, 0][-end_pt:]), temp[1][-end_pt:])
-				data.append(reshaped_data)
+			if num_game % 1000 == 0:
+				print('Progress log: %s games using %s' % (num_game, time.time() - start_time))
+			temp, _ = agent.collect_data(env, T)
+			data.append(temp)
+			temp, _ = agent.collect_data(play_env, T, True)
+			reshaped_data = (list(np.array(temp[0])[:, :, :, 0]), temp[1])
+			data.append(reshaped_data)
 			num_game = num_game + 1
-	return data
 
-def data_load2(agent,env,batch_size,forward):
-	data = []
-	for T in range(1, 32):
-		n_games = batch_size
-		num_game = 1
-		while num_game <= n_games:
-			if forward==False:
-				temp,_ = agent.collect_data(env, T)
-				data.append(temp)
-			else:
-				temp,_=agent.collect_data(env, T, True)
-				reshaped_data = (list(np.array(temp[0])[:, :, :, 0]), temp[1])
-				data.append(reshaped_data)
-			num_game = num_game + 1
+	np.random.shuffle(data)
 	return data
 
 def main():
@@ -84,7 +69,7 @@ def main():
 	# training
 	itr = 0
 
-	batch_size =500
+	batch_size =5000
 	update_num=0
 	max_updates=5
 	epochs_per_update=1
@@ -107,83 +92,29 @@ def main():
 		else:
 			nnet: nn.Module = DCAnet.get_nnet_model()
 		nnet.to(device)
+		print('Start data generation')
+		s_time=time.time()
+		data=train_load(agent, DCAEnv(), Env())
+		print('Finish data generation at %s' %(time.time()-s_time))
+		# data_file = open('C:/Users/anvyl/Desktop/Peg_solitaire_DCA/pre_data/15_32_bandf_10000_4peg.pkl', 'rb')
+		# data=pickle.load(data_file)
+		# data_file.close()
+		states = [s[0] for s in data]
+		cost = [s[1] for s in data]
+		costs = [c for cos in cost for c in cos]
+		costs_exp = np.expand_dims(costs, 1)
+		states_flatten = DCAnet.state_to_nnet_input(states)
 
+		states_data = (states_flatten, costs_exp)
 
-		print('-----------------------------Start training for backwards------------------------------------')
-		for i in range(1,32):
-			print("Start for %s steps scrambles"%i)
-			print('Starting data generation')
-			start_time = time.time()
-			if i<10:
-				num_sample=1000
-			else:
-				num_sample=1000
-			data = data_load(agent,bck_env,num_sample,False,i)
-			print('Finish data generation at %s' % (time.time() - start_time))
-			states = [s[0] for s in data]
-			cost = [s[1] for s in data]
-			costs = [c for cos in cost for c in cos]
-			costs_exp = np.expand_dims(costs, 1)
-			states_flatten = DCAnet.state_to_nnet_input(states)
-
-			states_data = (states_flatten, costs_exp)
-			if (i>1):
-				nnet = DCAnet.load_nnet("%s/model_state_dict.pt" % model_save_loc, DCAnet.get_nnet_model())
-				nnet.to(device)
-
-			# train nnet
-			num_train_itrs: int = epochs_per_update * np.ceil(len(states_data[0]) / batch_size)
-			#num_train_itrs=10
-			DCAnet.tarin_nnet(nnet, states_data, device, on_gpu, batch_size, num_train_itrs,
-							  train_itr=itr,Update=True)
-			itr += num_train_itrs
-
-			# save nnet
-			if not os.path.exists(model_save_loc):
-				os.makedirs(model_save_loc)
-			torch.save(nnet.state_dict(), "%s/model_state_dict.pt" % model_save_loc)
-			print("Finish for %s steps scrambles\n" % i)
-		print('-----------------------------Finish training for backwards------------------------------------\n')
+		num_train_itrs: int = epochs_per_update * np.ceil(len(states_data[0]) / batch_size)
+		DCAnet.tarin_nnet(nnet, states_data, device, on_gpu, batch_size, num_train_itrs,
+						  train_itr=itr, Update=True)
+		itr += num_train_itrs
 
 		if not os.path.exists(model_save_loc):
 			os.makedirs(model_save_loc)
 		torch.save(nnet.state_dict(), "%s/model_state_dict.pt" % model_save_loc)
-		
-		#------------------Training for forward data-------------------------------------------------
-		print('-----------------------------Start training for forwards------------------------------------\n')
-		for j in range(31, 0,-1):
-			print("Start for %s steps scrambles" % j)
-			print('Starting data generation')
-			start_time=time.time()
-			data = data_load(agent, for_env, 1000, True,j)
-			data.reverse()
-			print('Finish data generation at %s' % (time.time() - start_time))
-			states = [s[0] for s in data]
-			cost = [s[1] for s in data]
-			costs = [c for cos in cost for c in cos]
-			costs_exp = np.expand_dims(costs, 1)
-			states_flatten = DCAnet.state_to_nnet_input(states)
-
-			states_data = (states_flatten, costs_exp)
-
-
-			-nnet = DCAnet.load_nnet("%s/model_state_dict.pt" % model_save_loc, DCAnet.get_nnet_model())
-			nnet.to(device)
-
-			# train nnet
-			num_train_itrs: int = epochs_per_update * np.ceil(len(states_data[0]) / batch_size)
-			# num_train_itrs=10
-			DCAnet.tarin_nnet(nnet, states_data, device, on_gpu, batch_size, num_train_itrs,
-						  train_itr=itr,Update=True,Forward=True)
-
-			itr += num_train_itrs
-			print("Finish for %s steps scrambles\n" % j)
-			if not os.path.exists(model_save_loc):
-				os.makedirs(model_save_loc)
-			torch.save(nnet.state_dict(), "%s/model_state_dict.pt" % model_save_loc)
-
-
-		print('-----------------------------Finish training for forward------------------------------------')
 
 		# save nnet
 		# if not os.path.exists(model_save_loc):
